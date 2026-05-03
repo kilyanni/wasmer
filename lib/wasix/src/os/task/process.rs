@@ -16,7 +16,7 @@ use std::{
     time::Duration,
 };
 use tracing::trace;
-use wasmer::FunctionEnvMut;
+use wasmer::{FunctionEnvMut, SharedMemory};
 use wasmer_types::ModuleHash;
 use wasmer_wasix_types::{
     types::Signal,
@@ -179,6 +179,8 @@ pub struct WasiProcessInner {
     pub snapshot_on: HashSet<SnapshotTrigger>,
     /// Any wakers waiting on this process (for example for a checkpoint)
     pub wakers: Vec<Waker>,
+    /// Shared process memory.
+    pub memory: Option<SharedMemory>,
     /// The snapshot memory significantly reduce the amount of
     /// duplicate entries in the journal for memory that has not changed
     #[cfg(feature = "journal")]
@@ -432,6 +434,7 @@ impl WasiProcess {
                 children: Default::default(),
                 checkpoint: WasiProcessCheckpoint::Execute,
                 wakers: Default::default(),
+                memory: Default::default(),
                 waiting: waiting.clone(),
                 #[cfg(feature = "journal")]
                 snapshot_on: Default::default(),
@@ -580,6 +583,9 @@ impl WasiProcess {
         tracing::trace!(%pid, %tid, "signal-thread({:?})", signal);
 
         let inner = self.inner.0.lock().unwrap();
+        if should_wake_atomic_waiters_for_signal(signal) {
+            wake_atomic_waiters(&inner);
+        }
         if let Some(thread) = inner.threads.get(&tid) {
             thread.signal(signal);
         } else {
@@ -595,6 +601,12 @@ impl WasiProcess {
     /// Signals all the threads in this process
     pub fn signal_process(&self, signal: Signal) {
         signal_process_internal(&self.inner, signal);
+    }
+
+    /// Registers the shared memory used by this process.
+    pub fn register_memory(&self, memory: SharedMemory) {
+        let mut inner = self.inner.0.lock().unwrap();
+        inner.memory = Some(memory);
     }
 
     /// Takes a snapshot of the process and disables journaling returning
@@ -885,8 +897,39 @@ fn signal_process_internal(process: &LockableWasiProcessInner, signal: Signal) {
     }
 
     // Otherwise just send the signal to all the threads
+    if should_wake_atomic_waiters_for_signal(signal) {
+        wake_atomic_waiters(&guard);
+    }
     for thread in guard.threads.values() {
         thread.signal(signal);
+    }
+}
+
+fn should_wake_atomic_waiters_for_signal(signal: Signal) -> bool {
+    // Atomic wait wakeups are memory-wide, so only use them for signals
+    // that should interrupt or terminate execution anyway.
+    matches!(
+        signal,
+        Signal::Sigkill
+            | Signal::Sigterm
+            | Signal::Sigabrt
+            | Signal::Sigquit
+            | Signal::Sigint
+            | Signal::Sigstop
+            | Signal::Sigpipe
+    )
+}
+
+fn wake_atomic_waiters(process: &WasiProcessInner) {
+    let pid = process.pid;
+    if let Some(memory) = &process.memory {
+        if let Err(err) = memory.wake_all_atomic_waiters() {
+            tracing::trace!(
+                %pid,
+                error = &err as &dyn std::error::Error,
+                "failed to wake atomic waiters"
+            );
+        }
     }
 }
 

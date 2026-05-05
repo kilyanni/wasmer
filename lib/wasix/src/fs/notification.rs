@@ -75,7 +75,11 @@ impl NotificationInner {
         Self {
             state: Mutex::new(NotificationState {
                 counter: initial_val,
-                last_poll: u64::MAX,
+                // u64::MAX is the "needs reporting" sentinel used by wake_all.
+                // For initial_val=0 we must start at 0 so the first poll returns
+                // Pending; for initial_val>0 the fd is immediately readable, so
+                // we use the sentinel to make the first poll return Ready.
+                last_poll: if initial_val == 0 { 0 } else { u64::MAX },
                 is_semaphore,
                 wakers: Default::default(),
                 interest_handler: None,

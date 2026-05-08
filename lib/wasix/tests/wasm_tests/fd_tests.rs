@@ -17,6 +17,8 @@ wasm_test!(test_proc_spawn2_open_huge_fd, "proc-spawn2-open-huge-fd");
 
 wasm_test!(test_fd_close, "fd-close");
 
+wasm_test!(test_fd_event_readable, "fd-event-readable");
+
 wasm_test!(test_pipes, "pipes");
 
 wasm_test!(

@@ -690,6 +690,10 @@ impl VirtualFile for Stdout {
         Some(1)
     }
 
+    fn is_terminal(&self) -> bool {
+        std::io::IsTerminal::is_terminal(&std::io::stdout())
+    }
+
     fn poll_read_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
         Poll::Ready(Ok(0))
     }
@@ -868,6 +872,10 @@ impl VirtualFile for Stderr {
         Some(2)
     }
 
+    fn is_terminal(&self) -> bool {
+        std::io::IsTerminal::is_terminal(&std::io::stderr())
+    }
+
     fn poll_read_ready(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
         Poll::Ready(Ok(0))
     }
@@ -986,6 +994,9 @@ impl VirtualFile for Stdin {
     }
     fn get_special_fd(&self) -> Option<u32> {
         Some(0)
+    }
+    fn is_terminal(&self) -> bool {
+        std::io::IsTerminal::is_terminal(&std::io::stdin())
     }
     fn poll_read_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<usize>> {
         {

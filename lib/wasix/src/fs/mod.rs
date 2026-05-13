@@ -337,8 +337,6 @@ impl WasiInodes {
     }
 
     /// Get the `VirtualFile` object at stdin
-    /// TODO: Review why this is dead
-    #[allow(dead_code)]
     pub(crate) fn stdin(fd_map: &RwLock<FdList>) -> Result<InodeValFileReadGuard, FsError> {
         Self::std_dev_get(fd_map, __WASI_STDIN_FILENO)
     }
@@ -1568,10 +1566,18 @@ impl WasiFs {
     }
 
     pub fn fdstat(&self, fd: WasiFd) -> Result<Fdstat, Errno> {
+        let stdio_filetype = |file: Result<InodeValFileReadGuard, FsError>| {
+            if file.map(|f| f.is_terminal()).unwrap_or(false) {
+                Filetype::CharacterDevice
+            } else {
+                Filetype::Unknown
+            }
+        };
+
         match fd {
             __WASI_STDIN_FILENO => {
                 return Ok(Fdstat {
-                    fs_filetype: Filetype::CharacterDevice,
+                    fs_filetype: stdio_filetype(WasiInodes::stdin(&self.fd_map)),
                     fs_flags: Fdflags::empty(),
                     fs_rights_base: STDIN_DEFAULT_RIGHTS,
                     fs_rights_inheriting: Rights::empty(),
@@ -1579,7 +1585,7 @@ impl WasiFs {
             }
             __WASI_STDOUT_FILENO => {
                 return Ok(Fdstat {
-                    fs_filetype: Filetype::CharacterDevice,
+                    fs_filetype: stdio_filetype(WasiInodes::stdout(&self.fd_map)),
                     fs_flags: Fdflags::APPEND,
                     fs_rights_base: STDOUT_DEFAULT_RIGHTS,
                     fs_rights_inheriting: Rights::empty(),
@@ -1587,7 +1593,7 @@ impl WasiFs {
             }
             __WASI_STDERR_FILENO => {
                 return Ok(Fdstat {
-                    fs_filetype: Filetype::CharacterDevice,
+                    fs_filetype: stdio_filetype(WasiInodes::stderr(&self.fd_map)),
                     fs_flags: Fdflags::APPEND,
                     fs_rights_base: STDERR_DEFAULT_RIGHTS,
                     fs_rights_inheriting: Rights::empty(),

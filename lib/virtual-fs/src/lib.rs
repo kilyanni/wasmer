@@ -374,6 +374,14 @@ pub trait VirtualFile:
         None
     }
 
+    /// Whether this file refers to a terminal (TTY) on the host.
+    /// Defaults to false; only host-stdio wrappers should override this.
+    /// Used to determine whether to report `Filetype::CharacterDevice` for
+    /// stdio fds, which controls `isatty()` behavior in the guest.
+    fn is_terminal(&self) -> bool {
+        false
+    }
+
     /// Writes to this file using an mmap offset and reference
     /// (this method only works for mmap optimized file systems)
     fn write_from_mmap(&mut self, _offset: u64, _len: u64) -> std::io::Result<()> {

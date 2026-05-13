@@ -2,6 +2,9 @@ wasm_test!(test_fd_allocate, "fd-allocate");
 wasm_test!(test_fd_dup2_huge_min, "fd-dup2-huge-min");
 wasm_test!(test_fd_append_after_truncate, "fd-append-after-truncate");
 wasm_test!(test_fd_append_seek_read, "fd-append-seek-read");
+wasm_test!(test_fd_datasync_pipe, "fd-datasync-pipe");
+wasm_test!(test_fd_poll_pipe_stdio, "fd-poll-pipe-stdio");
+wasm_test!(test_fd_close_pipe_stdio, "fd-close-pipe-stdio");
 wasm_test!(test_fd_open_readonly, "fd-open-readonly");
 
 wasm_test!(

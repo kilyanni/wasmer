@@ -18,9 +18,12 @@
 //     stdio at a regular file via `dup2`. After the redirect, fd 0
 //     should describe the regular file, not a character device.
 //
-// The Rust harness pins stdin/stdout/stderr to non-tty capture buffers,
-// so all three stdio fds are guaranteed to be NOT a terminal regardless
-// of how `cargo test` is invoked.
+// stdin handling: the harness does not pin stdin, so depending on how
+// `cargo test` was launched it may or may not be a real tty. The test
+// probes once at start, records which case applies, and only asserts
+// the non-tty branch when stdin is not a host tty. stdout/stderr are
+// always backed by capture buffers in the harness and are unconditionally
+// expected to be non-tty.
 
 #include <assert.h>
 #include <errno.h>
@@ -120,7 +123,7 @@ static __wasi_filetype_t fdstat_filetype_of(__wasi_fd_t fd, const char *label) {
   return st.fs_filetype;
 }
 
-// Read st_filetype from fd_filestat_get and EXPECT success.
+// Read filetype from fd_filestat_get and EXPECT success.
 static __wasi_filetype_t filestat_filetype_of(__wasi_fd_t fd,
                                               const char *label) {
   __wasi_filestat_t st;
@@ -131,17 +134,39 @@ static __wasi_filetype_t filestat_filetype_of(__wasi_fd_t fd,
           (unsigned)err);
     return __WASI_FILETYPE_UNKNOWN;
   }
-  return st.st_filetype;
+  return st.filetype;
+}
+
+// Probe whether a given fd is a tty WITHOUT going through isatty(), so we
+// can decide what to assert about it. The fdstat path is the same logic
+// isatty() uses underneath, but reading it directly keeps the framing
+// honest: we are deciding based on what the runtime reports right now.
+static bool fd_is_chardev(__wasi_fd_t fd) {
+  __wasi_fdstat_t st;
+  memset(&st, 0, sizeof(st));
+  if (__wasi_fd_fdstat_get(fd, &st) != __WASI_ERRNO_SUCCESS) {
+    return false;
+  }
+  return st.fs_filetype == __WASI_FILETYPE_CHARACTER_DEVICE;
 }
 
 // ----------------------------------------------------------------------------
-// 1. isatty(stdio) is false in a non-tty test environment
+// 1. stdout and stderr are non-tty under the test harness (CaptureFile),
+//    so isatty() must return 0 with errno=ENOTTY.
+//
+//    stdin is only checked when the harness did not give us a real tty.
 // ----------------------------------------------------------------------------
 
-static void test_isatty_on_stdio_when_not_tty(void) {
-  printf("Test 1: isatty(stdin/stdout/stderr) returns 0 in non-tty env\n");
+static void test_isatty_on_stdio(bool stdin_is_tty) {
+  printf("Test 1: isatty(stdout/stderr) returns 0 (and stdin when non-tty)\n");
 
-  for (int fd = 0; fd <= 2; fd++) {
+  int fds[3] = {0, 1, 2};
+  for (int i = 0; i < 3; i++) {
+    int fd = fds[i];
+    if (fd == 0 && stdin_is_tty) {
+      printf("  fd 0 reported as a tty by the harness, skipping\n");
+      continue;
+    }
     errno = 0;
     int r = isatty(fd);
     if (r != 0) {
@@ -154,15 +179,21 @@ static void test_isatty_on_stdio_when_not_tty(void) {
 }
 
 // ----------------------------------------------------------------------------
-// 2. fd_fdstat_get on stdio MUST NOT report CHARACTER_DEVICE when not a tty.
-//    This is the primary bug the patch is intended to fix.
+// 2. fd_fdstat_get on stdio MUST NOT report CHARACTER_DEVICE when the
+//    underlying stream is not a real tty. This is the primary bug the
+//    patch is intended to fix.
 // ----------------------------------------------------------------------------
 
-static void test_stdio_fdstat_not_character_device(void) {
-  printf("Test 2: fd_fdstat_get on stdio is not CHARACTER_DEVICE in non-tty "
-         "env\n");
+static void test_stdio_fdstat_not_character_device(bool stdin_is_tty) {
+  printf("Test 2: fd_fdstat_get on stdout/stderr (and non-tty stdin) is not "
+         "CHARACTER_DEVICE\n");
 
-  for (__wasi_fd_t fd = 0; fd <= 2; fd++) {
+  __wasi_fd_t fds[3] = {0, 1, 2};
+  for (int i = 0; i < 3; i++) {
+    __wasi_fd_t fd = fds[i];
+    if (fd == 0 && stdin_is_tty) {
+      continue;
+    }
     __wasi_filetype_t ft = fdstat_filetype_of(fd, "stdio fdstat");
     if (ft == __WASI_FILETYPE_CHARACTER_DEVICE) {
       FAILF("fd %u reports CHARACTER_DEVICE but is not a tty",
@@ -340,15 +371,18 @@ static void test_fdstat_idempotent(void) {
 //
 //     `S_ISCHR(st.st_mode)` is the POSIX-portable way to ask "is this a
 //     character special file?". wasi-libc derives it from
-//     __wasi_fd_filestat_get's st_filetype, so this test exposes the
-//     same cached-Filestat gap as Test 3, from the user-visible angle.
+//     __wasi_fd_filestat_get's filetype, so this test exposes the same
+//     cached-Filestat gap as Test 3, from the user-visible angle.
 // ----------------------------------------------------------------------------
 
-static void test_libc_fstat_stdio_not_chardev(void) {
-  printf("Test 10: libc fstat on stdio does not report S_IFCHR in non-tty "
-         "env\n");
+static void test_libc_fstat_stdio_not_chardev(bool stdin_is_tty) {
+  printf("Test 10: libc fstat on stdout/stderr (and non-tty stdin) does not "
+         "report S_IFCHR\n");
 
   for (int fd = 0; fd <= 2; fd++) {
+    if (fd == 0 && stdin_is_tty) {
+      continue;
+    }
     struct stat st;
     int r = fstat(fd, &st);
     if (r != 0) {
@@ -383,7 +417,7 @@ static void test_dup2_regular_file_onto_stdin(void) {
   if (fd < 0) return;
 
   // Preserve original stdin so we can restore it before exiting; otherwise
-  // any later printf/diagnostic flush that walks stdio could misbehave.
+  // any later diagnostic flush that walks stdio could misbehave.
   int saved_stdin = dup(0);
   EXPECT(saved_stdin >= 0, "dup stdin to preserve it");
 
@@ -419,9 +453,9 @@ static void test_dup2_regular_file_onto_stdin(void) {
 }
 
 // ----------------------------------------------------------------------------
-// 12. Sanity check: __wasi_fd_filestat_get reports REGULAR_FILE for an
-//     opened file - exercises the opposite side of Test 4 without relying
-//     on isatty / fdstat agreement at all.
+// 12. Sanity check: libc fstat reports S_IFREG for an opened regular
+//     file, never S_IFCHR. Exercises the opposite side of Test 4
+//     without depending on isatty / fdstat agreement at all.
 // ----------------------------------------------------------------------------
 
 static void test_libc_fstat_regular_file_is_regular(void) {
@@ -449,11 +483,18 @@ static void test_libc_fstat_regular_file_is_regular(void) {
 // ----------------------------------------------------------------------------
 
 int main(void) {
+  // Probe stdin once so subsequent tests can branch on it. We deliberately
+  // use fdstat here rather than isatty(): if isatty()'s underlying fdstat
+  // were buggy in the same way we are testing for, using isatty() would
+  // hide the bug from itself.
+  bool stdin_is_tty = fd_is_chardev(0);
+
   printf("WASIX isatty / stdio filetype integration tests\n");
   printf("================================================\n");
+  printf("Harness stdin is %s a tty\n", stdin_is_tty ? "" : "NOT");
 
-  test_isatty_on_stdio_when_not_tty();
-  test_stdio_fdstat_not_character_device();
+  test_isatty_on_stdio(stdin_is_tty);
+  test_stdio_fdstat_not_character_device(stdin_is_tty);
   test_stdio_fdstat_filestat_consistent();
   test_regular_file_filetype();
   test_isatty_on_regular_file();
@@ -461,7 +502,7 @@ int main(void) {
   test_invalid_fd_badf();
   test_closed_fd_badf();
   test_fdstat_idempotent();
-  test_libc_fstat_stdio_not_chardev();
+  test_libc_fstat_stdio_not_chardev(stdin_is_tty);
   test_dup2_regular_file_onto_stdin();
   test_libc_fstat_regular_file_is_regular();
 

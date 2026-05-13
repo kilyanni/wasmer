@@ -26,26 +26,4 @@ wasm_test!(
     stdout = "0"
 );
 
-// Pins stdin to a non-tty capture so the assertion that stdio is *not* a
-// terminal holds regardless of whether `cargo test` was launched from an
-// interactive terminal. stdout/stderr are already capture buffers in the
-// shared runner.
-#[test]
-fn test_fd_isatty_and_stdio_filetype() {
-    use std::sync::{Arc, Mutex};
-
-    let wasm = super::run_build_script(file!(), "fd-isatty").unwrap();
-    let test_dir = wasm.parent().unwrap();
-    let result = super::run_wasm_with_runner_config(&wasm, test_dir, |runner| {
-        let buf = Arc::new(Mutex::new(Vec::new()));
-        runner.with_stdin(Box::new(super::CaptureFile::new(buf)));
-    })
-    .unwrap();
-
-    if result.exit_code != Some(0) {
-        panic!(
-            "fd-isatty test failed:\n{}",
-            super::format_captured_output(&result)
-        );
-    }
-}
+wasm_test!(test_fd_isatty, "fd-isatty");

@@ -201,7 +201,7 @@ impl AsyncCliCommand for PackageSearch {
     type Output = ();
 
     async fn run_async(self) -> Result<(), anyhow::Error> {
-        let client = self.env.client()?;
+        let client = self.env.client_unauthennticated()?;
 
         let with_interfaces =
             (!self.interfaces.is_empty()).then(|| self.interfaces.into_iter().map(Some).collect());

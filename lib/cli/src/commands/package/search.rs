@@ -1,12 +1,16 @@
 //! Search for packages in the registry.
 
-use wasmer_backend_api::types::DateTime;
+use wasmer_backend_api::types::{DateTime, SearchPackageVersion};
 use wasmer_sdk::package::search::{
     CountComparison, CountFilter, PackageOrderBy, PackagesFilter, SearchOptions, SearchOrderSort,
     SearchPublishDate,
 };
 
-use crate::{commands::AsyncCliCommand, config::WasmerEnv, opts::ListFormatOpts};
+use crate::{
+    commands::AsyncCliCommand, config::WasmerEnv, opts::ListFormatOpts, utils::render::ListFormat,
+};
+
+const NO_PACKAGES_FOUND_MESSAGE: &str = "No packages found.";
 
 /// Field to order results by.
 #[derive(clap::ValueEnum, Clone, Copy, Debug)]
@@ -85,6 +89,14 @@ fn parse_rfc3339(value: &str) -> Result<DateTime, String> {
         .map_err(|e| {
             format!("`{value}` is not an RFC3339 timestamp (e.g. 2024-01-01T00:00:00Z): {e}")
         })
+}
+
+fn render_search_results(format: ListFormat, results: &[SearchPackageVersion]) -> String {
+    if results.is_empty() && matches!(format, ListFormat::Table | ListFormat::ItemTable) {
+        NO_PACKAGES_FOUND_MESSAGE.to_string()
+    } else {
+        format.render(results)
+    }
 }
 
 /// Search for packages in the registry.
@@ -227,7 +239,10 @@ impl AsyncCliCommand for PackageSearch {
         )
         .await?;
 
-        println!("{}", self.fmt.format.render(results.as_slice()));
+        println!(
+            "{}",
+            render_search_results(self.fmt.format, results.as_slice())
+        );
 
         Ok(())
     }

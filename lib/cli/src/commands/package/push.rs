@@ -52,7 +52,9 @@ pub struct PackagePush {
     /// Path to a package source:
     /// - a directory containing `wasmer.toml`
     /// - a custom `*.toml` manifest file
-    /// - a pre-built raw `*.webc` file
+    /// - a pre-built raw `*.webc` file (a `*.webcm` sidecar next to it, when
+    ///   present, provides the package's name and version)
+    /// - a `*.webcm` sidecar manifest naming the pre-built `*.webc` beside it
     ///
     /// Defaults to current working directory.
     #[clap(name = "path", default_value = ".")]

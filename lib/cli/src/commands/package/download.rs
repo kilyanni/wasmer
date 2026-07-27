@@ -155,6 +155,19 @@ impl PackageDownload {
                 )
                     })?;
 
+                // A yanked version still downloads when pinned exactly, so warn and continue.
+                if package.yanked_at.is_some() {
+                    match package.yank_reason.as_deref() {
+                        Some(reason) => eprintln!(
+                            "warning: {}@{} has been yanked: {reason}",
+                            full_name, package.version
+                        ),
+                        None => {
+                            eprintln!("warning: {}@{} has been yanked", full_name, package.version)
+                        }
+                    }
+                }
+
                 let download_url = package
                     .distribution_v3
                     .pirita_download_url

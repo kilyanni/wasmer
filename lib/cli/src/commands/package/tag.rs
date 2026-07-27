@@ -466,25 +466,38 @@ impl PackageTag {
                     let mut new_version = registry_version.clone();
                     new_version.patch += 1;
                     if must_bump {
+                        // Republishing the same version with different contents is no
+                        // longer a conflict. The registry keeps it as a new rebuild (rel).
                         eprintln!(
                             "{}: Registry already has version {user_version} of {full_pkg_name}, but with different contents.",
-                            "Warn".bold().yellow()
+                            "Note".bold().yellow()
                         );
-                        eprintln!(
-                            "{}: Not bumping the version will make this action fail.",
-                            "Warn".bold().yellow()
-                        );
-                        let res = Confirm::with_theme(&theme)
-                            .with_prompt(format!("Continue ({user_version} -> {new_version})?"))
+                        let rebuild = Confirm::with_theme(&theme)
+                            .with_prompt(format!(
+                                "Publish a rebuild of {user_version} (a new revision at the same version)?"
+                            ))
                             .interact()?;
-                        if res {
-                            user_version = new_version.clone();
-                            self.update_manifest_version(manifest_path, manifest, &user_version)
-                                .await?;
+                        if rebuild {
+                            // Keep the version. The backend appends a rel.
                         } else {
-                            anyhow::bail!(
-                                "Refusing to map two different releases of {full_pkg_name} to the same version."
-                            )
+                            let res = Confirm::with_theme(&theme)
+                                .with_prompt(format!(
+                                    "Bump the version instead ({user_version} -> {new_version})?"
+                                ))
+                                .interact()?;
+                            if res {
+                                user_version = new_version.clone();
+                                self.update_manifest_version(
+                                    manifest_path,
+                                    manifest,
+                                    &user_version,
+                                )
+                                .await?;
+                            } else {
+                                anyhow::bail!(
+                                    "Aborting: neither rebuilding nor bumping {full_pkg_name}@{user_version}."
+                                )
+                            }
                         }
                     } else {
                         let res = Confirm::with_theme(&theme)

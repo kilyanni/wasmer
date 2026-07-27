@@ -1385,6 +1385,57 @@ pub async fn push_package_release(
         .map(|r| r.push_package_release)
 }
 
+/// Yank (or, with `undo`, unyank) an explicit set of package versions by node
+/// id.
+///
+/// Requires package-admin rights. Returns only the versions whose yank state
+/// changed, so a repeated yank comes back empty.
+pub async fn yank_package_versions(
+    client: &WasmerClient,
+    package_version_ids: Vec<cynic::Id>,
+    reason: Option<&str>,
+    undo: bool,
+) -> Result<Vec<types::YankedPackageVersion>, anyhow::Error> {
+    client
+        .run_graphql_strict(types::YankPackageVersions::build(
+            types::YankPackageVersionsVariables {
+                package_version_ids,
+                reason,
+                undo: Some(undo),
+            },
+        ))
+        .await
+        .map(|response| {
+            response
+                .yank_package_versions
+                .map(|payload| payload.package_versions)
+                .unwrap_or_default()
+        })
+}
+
+/// List a package's current-rel versions as `(node id, version)` pairs, or
+/// `None` when the package doesn't exist.
+pub async fn get_package_version_ids(
+    client: &WasmerClient,
+    name: String,
+) -> Result<Option<Vec<(cynic::Id, String)>>, anyhow::Error> {
+    let package = client
+        .run_graphql_strict(types::GetPackageVersionNumbers::build(
+            types::GetPackageVars { name },
+        ))
+        .await?
+        .get_package;
+
+    Ok(package.map(|p| {
+        p.versions
+            .unwrap_or_default()
+            .into_iter()
+            .flatten()
+            .map(|v| (v.id, v.version))
+            .collect()
+    }))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn tag_package_release(
     client: &WasmerClient,

@@ -301,7 +301,7 @@ fn select_latest_named_dependency(
         })
         .ok_or_else(|| QueryError::NoMatches {
             query: dep.pkg.clone(),
-            archived_versions: Vec::new(),
+            yanked_versions: Vec::new(),
         })
 }
 

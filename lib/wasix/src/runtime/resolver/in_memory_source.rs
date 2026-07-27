@@ -159,7 +159,7 @@ impl Source for InMemorySource {
                         if matches.is_empty() {
                             return Err(QueryError::NoMatches {
                                 query: package.clone(),
-                                archived_versions: Vec::new(),
+                                yanked_versions: Vec::new(),
                             });
                         }
 
@@ -176,7 +176,7 @@ impl Source for InMemorySource {
                 .map(|x| vec![x.clone()])
                 .ok_or_else(|| QueryError::NoMatches {
                     query: package.clone(),
-                    archived_versions: Vec::new(),
+                    yanked_versions: Vec::new(),
                 }),
             PackageSource::Url(_) | PackageSource::Path(_) => Err(QueryError::Unsupported {
                 query: package.clone(),

@@ -48,12 +48,21 @@ pub fn sock_connect<M: MemorySize>(
     Ok(Errno::Success)
 }
 
-fn nonblocking_connect_result(status: crate::net::socket::WasiSocketStatus) -> Result<(), Errno> {
+fn nonblocking_connect_result(
+    status: crate::net::socket::WasiSocketStatus,
+    last_error: Errno,
+) -> Result<(), Errno> {
     match status {
         crate::net::socket::WasiSocketStatus::Opening => Err(Errno::Inprogress),
         crate::net::socket::WasiSocketStatus::Opened => Ok(()),
+        // A local RST can latch the failure before the first status check;
+        // report the latched connect error, ENOTCONN only when none is
+        // recorded.
         crate::net::socket::WasiSocketStatus::Closed
-        | crate::net::socket::WasiSocketStatus::Failed => Err(Errno::Notconn),
+        | crate::net::socket::WasiSocketStatus::Failed => Err(match last_error {
+            Errno::Success => Errno::Notconn,
+            err => err,
+        }),
     }
 }
 
@@ -91,11 +100,13 @@ pub(crate) fn sock_connect_internal(
     ));
 
     if nonblocking {
-        let status = match __sock_actor(ctx, sock, Rights::empty(), |socket, _| socket.status()) {
-            Ok(status) => status,
+        let (status, last_error) = match __sock_actor(ctx, sock, Rights::empty(), |socket, _| {
+            Ok((socket.status()?, socket.last_error()?))
+        }) {
+            Ok(res) => res,
             Err(err) => return Ok(Err(err)),
         };
-        return Ok(nonblocking_connect_result(status));
+        return Ok(nonblocking_connect_result(status, last_error));
     }
 
     Ok(Ok(()))
@@ -110,16 +121,23 @@ mod tests {
     #[test]
     fn nonblocking_connect_result_maps_socket_states() {
         assert_eq!(
-            nonblocking_connect_result(WasiSocketStatus::Opening),
+            nonblocking_connect_result(WasiSocketStatus::Opening, Errno::Success),
             Err(Errno::Inprogress)
         );
-        assert_eq!(nonblocking_connect_result(WasiSocketStatus::Opened), Ok(()));
         assert_eq!(
-            nonblocking_connect_result(WasiSocketStatus::Failed),
+            nonblocking_connect_result(WasiSocketStatus::Opened, Errno::Success),
+            Ok(())
+        );
+        assert_eq!(
+            nonblocking_connect_result(WasiSocketStatus::Failed, Errno::Connrefused),
+            Err(Errno::Connrefused)
+        );
+        assert_eq!(
+            nonblocking_connect_result(WasiSocketStatus::Failed, Errno::Success),
             Err(Errno::Notconn)
         );
         assert_eq!(
-            nonblocking_connect_result(WasiSocketStatus::Closed),
+            nonblocking_connect_result(WasiSocketStatus::Closed, Errno::Success),
             Err(Errno::Notconn)
         );
     }
